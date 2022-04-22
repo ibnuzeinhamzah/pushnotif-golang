@@ -455,7 +455,7 @@ func main() {
 	}
 
 	c := cron.New()
-	c.AddFunc("0 */10 * * * *", scheduledAlert)
+	c.AddFunc("0 0 * * * *", scheduledAlert)
 	c.Start()
 
 	// go scheduledAlert()
