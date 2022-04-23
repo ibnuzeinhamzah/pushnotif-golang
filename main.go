@@ -101,23 +101,23 @@ func Connect() error {
 	return nil
 }
 
-func getAllToken() ([]UserToken, error) {
+func getAllToken() (*[]UserToken, error) {
 	result := []UserToken{}
 
 	rows, err := db.Query("SELECT token, lat, lon FROM device_tokens WHERE lat IS NOT NULL AND lon IS NOT NULL AND lat != '' AND lon != ''")
 	if err != nil {
-		return result, err
+		return &result, err
 	}
 	defer rows.Close()
 
 	for rows.Next() {
 		u := UserToken{}
 		if err := rows.Scan(&u.Token, &u.Lat, &u.Lon); err != nil {
-			return result, err
+			return &result, err
 		}
 		result = append(result, u)
 	}
-	return result, nil
+	return &result, nil
 }
 
 func getPolygon(y int, m int, d int, ch chan []PolygonDB) {
@@ -143,7 +143,6 @@ func getPolygon(y int, m int, d int, ch chan []PolygonDB) {
 }
 
 func getPointFromRaster(d []PolygonDB, rasterUrl string, ch chan map[string][][][2]float64) {
-	log.Println(d)
 	points := make(map[string][][][2]float64)
 
 	for j := 0; j < len(d); j++ {
@@ -221,20 +220,19 @@ func histogram(rings string, rasterUrl string) [][2]float64 {
 	return polygonAlerts
 }
 
-func getInsideToken(data map[string][][][2]float64, allToken []UserToken, ch chan map[string][]string) {
-	log.Println(data)
+func getInsideToken(data map[string][][][2]float64, allToken *[]UserToken, ch chan map[string][]string) {
 	result := make(map[string][]string)
 	flag := true
-	for k := 0; k < len(allToken); k++ {
+	for k := 0; k < len(*allToken); k++ {
 		flag = true
 		for x := range data {
 			for i := 0; i < len(data[x]) && flag; i++ {
 				if len(data[x][i]) > 0 {
 					p := data[x][i]
 					for j := 0; j < len(p); j++ {
-						r := countDistance(allToken[k].Lat, allToken[k].Lon, p[j][1], p[j][0])
+						r := countDistance((*allToken)[k].Lat, (*allToken)[k].Lon, p[j][1], p[j][0])
 						if r <= minDistance {
-							result[x] = append(result[x], allToken[k].Token)
+							result[x] = append(result[x], (*allToken)[k].Token)
 							flag = false
 							break
 						}
@@ -335,7 +333,7 @@ func sentAlert(ctx context.Context, client *messaging.Client, tokens map[string]
 				status = "Bahaya"
 			}
 
-			title := status + ", Potensi Bencana " + potensi + " " + when + " di Sekitar Lokasi Anda."
+			title := status + ", Potensi Bencana " + potensi + " Pada " + when + " di Sekitar Lokasi Anda."
 			message := prepareMessage(title)
 			token := tokens[x][start:end]
 
@@ -367,6 +365,24 @@ func initializeFCM() *firebase.App {
 	return app
 }
 
+func processPolygon(ctx context.Context, client *messaging.Client, alltoken *[]UserToken, polygon []PolygonDB, rasterUrl string, when string, disaster string) {
+	pointCh := make(chan map[string][][][2]float64)
+	go getPointFromRaster(polygon, rasterUrl, pointCh)
+	point := <-pointCh
+	if len(point) > 0 {
+		log.Println("get user near point...")
+		tokenCh := make(chan map[string][]string)
+		go getInsideToken(point, alltoken, tokenCh)
+		token := <-tokenCh
+		if len(token) > 0 {
+			fmt.Println("trying to sent message %s..", when)
+			go sentAlert(ctx, client, token, when, disaster)
+		} else {
+			fmt.Println("token %s kosong..", when)
+		}
+	}
+}
+
 func scheduledAlert() {
 	log.Println("start...")
 	log.Println("get all tokens...")
@@ -379,13 +395,13 @@ func scheduledAlert() {
 	tomorrowCh := make(chan []PolygonDB)
 	dayAfterCh := make(chan []PolygonDB)
 
-	todayPointCh := make(chan map[string][][][2]float64)
-	tomorrowPointCh := make(chan map[string][][][2]float64)
-	dayAfterPointCh := make(chan map[string][][][2]float64)
+	// todayPointCh := make(chan map[string][][][2]float64)
+	// tomorrowPointCh := make(chan map[string][][][2]float64)
+	// dayAfterPointCh := make(chan map[string][][][2]float64)
 
-	todayTokenCh := make(chan map[string][]string)
-	tomorrowTokenCh := make(chan map[string][]string)
-	dayAfterTokenCh := make(chan map[string][]string)
+	// todayTokenCh := make(chan map[string][]string)
+	// tomorrowTokenCh := make(chan map[string][]string)
+	// dayAfterTokenCh := make(chan map[string][]string)
 
 	log.Println("get polygon...")
 	go getPolygon(t.Year(), int(t.Month()), t.Day(), todayCh)
@@ -412,36 +428,14 @@ func scheduledAlert() {
 	for x := range raster {
 		log.Println("raster: ", raster[x])
 		log.Println("get point...")
-		go getPointFromRaster(todayPolygon, raster[x], todayPointCh)
-		go getPointFromRaster(tomorrowPolygon, raster[x], tomorrowPointCh)
-		go getPointFromRaster(dayAfterTomorrowPolygon, raster[x], dayAfterPointCh)
-		todayPoint, tomorrowPoint, dayAfterPoint := <-todayPointCh, <-tomorrowPointCh, <-dayAfterPointCh
-
-		log.Println("get user near point today...")
-		go getInsideToken(todayPoint, allToken, todayTokenCh)
-		log.Println("get user near point tomorrow...")
-		go getInsideToken(tomorrowPoint, allToken, tomorrowTokenCh)
-		log.Println("get user near point lusa...")
-		go getInsideToken(dayAfterPoint, allToken, dayAfterTokenCh)
-		todayToken, tomorrowToken, dayAfterToken := <-todayTokenCh, <-tomorrowTokenCh, <-dayAfterTokenCh
-
-		if len(todayToken) > 0 {
-			fmt.Println("trying to sent message hari ini..")
-			go sentAlert(ctx, client, todayToken, "Hari Ini", x)
-		} else {
-			fmt.Println("token hari ini kosong..")
+		if len(todayPolygon) > 0 {
+			go processPolygon(ctx, client, allToken, todayPolygon, raster[x], "Hari Ini", x)
 		}
-		if len(tomorrowToken) > 0 {
-			fmt.Println("trying to sent message esok hari..")
-			go sentAlert(ctx, client, tomorrowToken, "Esok Hari", x)
-		} else {
-			fmt.Println("token esok kosong..")
+		if len(tomorrowPolygon) > 0 {
+			go processPolygon(ctx, client, allToken, tomorrowPolygon, raster[x], "Esok Hari", x)
 		}
-		if len(dayAfterToken) > 0 {
-			fmt.Println("trying to sent message lusa..")
-			go sentAlert(ctx, client, dayAfterToken, "Dalam 2 Hari Kedepan", x)
-		} else {
-			fmt.Println("token lusa kosong..")
+		if len(dayAfterTomorrowPolygon) > 0 {
+			go processPolygon(ctx, client, allToken, dayAfterTomorrowPolygon, raster[x], "Lusa", x)
 		}
 	}
 }
