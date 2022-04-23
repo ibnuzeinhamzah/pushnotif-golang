@@ -21,6 +21,7 @@ import (
 	"firebase.google.com/go/v4/messaging"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
+
 	"github.com/robfig/cron"
 	"google.golang.org/api/option"
 )
@@ -144,7 +145,6 @@ func getPolygon(y int, m int, d int, ch chan []PolygonDB) {
 
 func getPointFromRaster(d []PolygonDB, rasterUrl string, ch chan map[string][][][2]float64) {
 	points := make(map[string][][][2]float64)
-
 	for j := 0; j < len(d); j++ {
 		e := strings.Split(d[j].Polygon, " ")
 		rings := ""
@@ -315,9 +315,18 @@ func sentAlert(ctx context.Context, client *messaging.Client, tokens map[string]
 		potensi = "Banjir"
 	} else if bahaya == "bandang" {
 		potensi = "Banjir Bandang"
-	} else {
+	} else if bahaya == "longsor" {
 		potensi = "Tanah Longsor"
+	} else if bahaya == "covid" {
+		potensi = "Covid-19"
+	} else if bahaya == "gempa" {
+		potensi = "Gempabumi"
+	} else if bahaya == "ekstrem" {
+		potensi = "Cuaca Ekstrem"
+	} else {
+		potensi = ""
 	}
+
 	for x := range tokens {
 		start := 0
 		end := 500
@@ -338,7 +347,7 @@ func sentAlert(ctx context.Context, client *messaging.Client, tokens map[string]
 
 			fmt.Println("trying to sent message", status, potensi, when, "..")
 
-			title := status + ", Potensi Bencana " + potensi + " Pada " + when + " di Sekitar Lokasi Anda."
+			title := status + ", Potensi Bencana " + potensi + when + " di Sekitar Lokasi Anda."
 			token := tokens[x][start:end]
 
 			for len(token) > 0 {
@@ -377,18 +386,17 @@ func processPolygon(ctx context.Context, client *messaging.Client, alltoken *[]U
 	pointCh := make(chan map[string][][][2]float64)
 	go getPointFromRaster(polygon, rasterUrl, pointCh)
 	point := <-pointCh
-	if len(point) > 0 {
-		log.Println("get user point near", disaster, when, "..")
-		tokenCh := make(chan map[string][]string)
-		go getInsideToken(point, alltoken, tokenCh)
-		token := <-tokenCh
+	// if len(point) > 0 {
+	log.Println("get user point near", disaster, when, "..")
+	tokenCh := make(chan map[string][]string)
+	go getInsideToken(point, alltoken, tokenCh)
+	token := <-tokenCh
 
-		go sentAlert(ctx, client, token, when, disaster)
-	}
+	go sentAlert(ctx, client, token, when, disaster)
+	// }
 }
 
 func scheduledAlert() {
-	log.Println("start..")
 	log.Println("get all tokens..")
 	allToken, _ := getAllToken()
 
@@ -419,7 +427,7 @@ func scheduledAlert() {
 	client, err := app.Messaging(ctx)
 
 	if err != nil {
-		log.Println("error getting Messaging client: %v", err)
+		log.Println("error getting Messaging client:", err)
 		panic(err)
 	}
 
@@ -427,6 +435,9 @@ func scheduledAlert() {
 		"banjir":  `http://inarisk1.bnpb.go.id:6080/arcgis/rest/services/inaRISK/INDEKS_BAHAYA_BANJIR/ImageServer/getSamples`,
 		"bandang": `http://inarisk1.bnpb.go.id:6080/arcgis/rest/services/inaRISK/INDEKS_BAHAYA_BANJIR_BANDANG/ImageServer/getSamples`,
 		"longsor": `http://inarisk1.bnpb.go.id:6080/arcgis/rest/services/inaRISK/INDEKS_BAHAYA_TANAH_LONGSOR/ImageServer/getSamples`,
+		// "covid":   `http://inarisk1.bnpb.go.id:6080/arcgis/rest/services/COVID19/indeks_bahaya_covid19/ImageServer/getSamples`,
+		// "gempa":   `http://inarisk1.bnpb.go.id:6080/arcgis/rest/services/inaRISK/INDEKS_BAHAYA_GEMPABUMI/ImageServer/getSamples`,
+		"ektrem": `http://inarisk1.bnpb.go.id:6080/arcgis/rest/services/inaRISK/INDEKS_BAHAYA_CUACAEKSTRIM/ImageServer/getSamples`,
 	}
 
 	for x := range raster {
