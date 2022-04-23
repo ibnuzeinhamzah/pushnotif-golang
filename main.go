@@ -123,7 +123,7 @@ func getAllToken() (*[]UserToken, error) {
 func getPolygon(y int, m int, d int, ch chan []PolygonDB) {
 	result := []PolygonDB{}
 	tgl := fmt.Sprintf("'%d-%d-%d'", y, m, d)
-	sql := fmt.Sprintf("SELECT severity, polygons FROM alert_signature_bmkg WHERE severity IS NOT NULL AND (guid = 'fakealertxyz' OR guid = 'fakealert123') AND effective::date = (%s)::date", tgl)
+	sql := fmt.Sprintf("SELECT severity, polygons FROM alert_signature_bmkg WHERE severity IS NOT NULL AND effective::date = (%s)::date", tgl) //AND (guid = 'fakealertxyz' OR guid = 'fakealert123')
 
 	rows, err := db.Query(sql)
 	if err != nil {
