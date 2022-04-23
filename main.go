@@ -251,7 +251,7 @@ func countDistance(lat1 float64, lon1 float64, lat2 float64, lon2 float64) float
 	return distance
 }
 
-func prepareMessage(title string) *messaging.MulticastMessage {
+func prepareMessage(title string, token []string) *messaging.MulticastMessage {
 	oneHour := time.Duration(1) * time.Hour
 	badge := 42
 	message := &messaging.MulticastMessage{
@@ -269,6 +269,7 @@ func prepareMessage(title string) *messaging.MulticastMessage {
 				},
 			},
 		},
+		Tokens: token,
 	}
 	return message
 }
@@ -295,13 +296,15 @@ func sendMulticastAndHandleErrors(ctx context.Context, client *messaging.Client,
 	}
 
 	if br.FailureCount > 0 {
-		var failedTokens []string
-		for idx, resp := range br.Responses {
+		// var failedTokens []string
+		var numFailedTokens int
+		for _, resp := range br.Responses {
 			if !resp.Success {
-				failedTokens = append(failedTokens, tokens[idx])
+				// failedTokens = append(failedTokens, tokens[idx])
+				numFailedTokens++
 			}
 		}
-		fmt.Printf("List of tokens that caused failures: %v\n", failedTokens)
+		fmt.Printf("Number of tokens that caused failures: %d from : %d\n", numFailedTokens, len(tokens))
 	}
 }
 
@@ -333,14 +336,19 @@ func sentAlert(ctx context.Context, client *messaging.Client, tokens map[string]
 				status = "Bahaya"
 			}
 
+			fmt.Println("trying to sent message", status, potensi, when, "..")
+
 			title := status + ", Potensi Bencana " + potensi + " Pada " + when + " di Sekitar Lokasi Anda."
-			message := prepareMessage(title)
 			token := tokens[x][start:end]
 
 			for len(token) > 0 {
+				message := prepareMessage(title, token)
 				sendMulticastAndHandleErrors(ctx, client, message, token)
 				start = end
 				end = end + 500
+				if end > len(tokens[x]) {
+					end = len(tokens[x])
+				}
 				token = tokens[x][start:end]
 			}
 
@@ -370,22 +378,18 @@ func processPolygon(ctx context.Context, client *messaging.Client, alltoken *[]U
 	go getPointFromRaster(polygon, rasterUrl, pointCh)
 	point := <-pointCh
 	if len(point) > 0 {
-		log.Println("get user near point...")
+		log.Println("get user point near", disaster, when, "..")
 		tokenCh := make(chan map[string][]string)
 		go getInsideToken(point, alltoken, tokenCh)
 		token := <-tokenCh
-		if len(token) > 0 {
-			fmt.Println("trying to sent message %s..", when)
-			go sentAlert(ctx, client, token, when, disaster)
-		} else {
-			fmt.Println("token %s kosong..", when)
-		}
+
+		go sentAlert(ctx, client, token, when, disaster)
 	}
 }
 
 func scheduledAlert() {
-	log.Println("start...")
-	log.Println("get all tokens...")
+	log.Println("start..")
+	log.Println("get all tokens..")
 	allToken, _ := getAllToken()
 
 	t := time.Now()
@@ -403,7 +407,7 @@ func scheduledAlert() {
 	// tomorrowTokenCh := make(chan map[string][]string)
 	// dayAfterTokenCh := make(chan map[string][]string)
 
-	log.Println("get polygon...")
+	log.Println("get polygon potensi bencana bmkg..")
 	go getPolygon(t.Year(), int(t.Month()), t.Day(), todayCh)
 	go getPolygon(t1.Year(), int(t1.Month()), t1.Day(), tomorrowCh)
 	go getPolygon(t2.Year(), int(t2.Month()), t2.Day(), dayAfterCh)
@@ -426,8 +430,7 @@ func scheduledAlert() {
 	}
 
 	for x := range raster {
-		log.Println("raster: ", raster[x])
-		log.Println("get point...")
+		log.Println("check point from raster", x)
 		if len(todayPolygon) > 0 {
 			go processPolygon(ctx, client, allToken, todayPolygon, raster[x], "Hari Ini", x)
 		}
@@ -449,7 +452,7 @@ func main() {
 	}
 
 	c := cron.New()
-	c.AddFunc("0 0 * * * *", scheduledAlert)
+	c.AddFunc("0 * * * * *", scheduledAlert)
 	c.Start()
 
 	// go scheduledAlert()
