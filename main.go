@@ -128,7 +128,7 @@ func getPolygon(y int, m int, d int, ch chan []PolygonDB) {
 
 	rows, err := db.Query(sql)
 	if err != nil {
-		fmt.Println("error: ", err)
+		log.Println("error: ", err)
 		ch <- result
 	}
 	defer rows.Close()
@@ -151,13 +151,10 @@ func getPointFromRaster(d []PolygonDB, rasterUrl string, ch chan map[string][][]
 
 		for i := 0; i < len(e); i++ {
 			g := strings.Split(e[i], ",")
-			if rings != "" {
-				if len(g) > 1 {
+			if len(g) > 1 {
+				if rings != "" {
 					rings = rings + ","
 				}
-			}
-
-			if len(g) > 1 {
 				rings = rings + "[" + g[1] + "," + g[0] + "]"
 			}
 		}
@@ -172,8 +169,6 @@ func getPointFromRaster(d []PolygonDB, rasterUrl string, ch chan map[string][][]
 
 func histogram(rings string, rasterUrl string) [][2]float64 {
 	polygonAlerts := [][2]float64{}
-
-	// uri := `http://inarisk1.bnpb.go.id:6080/arcgis/rest/services/inaRISK/INDEKS_BAHAYA_BANJIR/ImageServer/getSamples`
 
 	dataUrl := url.Values{}
 	dataUrl.Set("geometry", `{"rings":`+rings+`,"spatialReference":{"wkid":4326}}`)
@@ -196,7 +191,7 @@ func histogram(rings string, rasterUrl string) [][2]float64 {
 
 	body, _ := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Println("whiips:", err)
+		log.Println("whiips:", err)
 		panic(err)
 	}
 	data := bytes.NewBuffer(body)
@@ -204,7 +199,7 @@ func histogram(rings string, rasterUrl string) [][2]float64 {
 	t := new(ListSample)
 	err = json.Unmarshal(data.Bytes(), &t)
 	if err != nil {
-		fmt.Println("whoops:", err)
+		log.Println("whoops:", err)
 		panic(err)
 	}
 
@@ -274,21 +269,6 @@ func prepareMessage(title string, token []string) *messaging.MulticastMessage {
 	return message
 }
 
-// func subscribeToTopic(ctx context.Context, client *messaging.Client, topic string, tokens []string) {
-// 	_, err := client.SubscribeToTopic(ctx, tokens, topic)
-// 	if err != nil {
-// 		log.Fatalln(err)
-// 	}
-// 	// fmt.Println(response.SuccessCount, "tokens were subscribed successfully")
-// }
-// func unsubscribeFromTopic(ctx context.Context, client *messaging.Client, topic string, tokens []string) {
-// 	_, err := client.UnsubscribeFromTopic(ctx, tokens, topic)
-// 	if err != nil {
-// 		log.Fatalln(err)
-// 	}
-// 	// fmt.Println(response.SuccessCount, "tokens were unsubscribed successfully")
-// }
-
 func sendMulticastAndHandleErrors(ctx context.Context, client *messaging.Client, message *messaging.MulticastMessage, tokens []string) {
 	br, err := client.SendMulticast(context.Background(), message)
 	if err != nil {
@@ -304,7 +284,7 @@ func sendMulticastAndHandleErrors(ctx context.Context, client *messaging.Client,
 				numFailedTokens++
 			}
 		}
-		fmt.Printf("Number of tokens that caused failures: %d from : %d\n", numFailedTokens, len(tokens))
+		log.Println("Number of tokens failured to sent:", numFailedTokens, "from :", len(tokens))
 	}
 }
 
@@ -334,9 +314,6 @@ func sentAlert(ctx context.Context, client *messaging.Client, tokens map[string]
 			end = len(tokens[x])
 		}
 		if len(tokens[x]) > 0 {
-			// fmt.Println("trying to subscribe client..")
-			// subscribeToTopic(ctx, client, "inarisk", tokens[x])
-
 			if x == "Moderate" {
 				status = "Waspada"
 			} else if x == "Severe" {
@@ -345,7 +322,7 @@ func sentAlert(ctx context.Context, client *messaging.Client, tokens map[string]
 				status = "Bahaya"
 			}
 
-			fmt.Println("trying to sent message", status, potensi, when, "..")
+			log.Println("trying to sent message", status, potensi, when, "..")
 
 			title := status + ", Potensi Bencana " + potensi + when + " di Sekitar Lokasi Anda."
 			token := tokens[x][start:end]
@@ -361,14 +338,7 @@ func sentAlert(ctx context.Context, client *messaging.Client, tokens map[string]
 				token = tokens[x][start:end]
 			}
 
-			// response, err := client.Send(ctx, message)
-			// if err != nil {
-			// 	log.Fatalln(err)
-			// }
-			// fmt.Println("trying to unsubscribe client..")
-			// unsubscribeFromTopic(ctx, client, "inarisk", tokens[x])
-			// fmt.Println("Successfully sent message:", response)
-			fmt.Println("Successfully sent message:")
+			log.Println("successfully sent message", status, potensi, when, "..")
 		}
 	}
 }
@@ -386,14 +356,13 @@ func processPolygon(ctx context.Context, client *messaging.Client, alltoken *[]U
 	pointCh := make(chan map[string][][][2]float64)
 	go getPointFromRaster(polygon, rasterUrl, pointCh)
 	point := <-pointCh
-	// if len(point) > 0 {
+
 	log.Println("get user point near", disaster, when, "..")
 	tokenCh := make(chan map[string][]string)
 	go getInsideToken(point, alltoken, tokenCh)
 	token := <-tokenCh
 
 	go sentAlert(ctx, client, token, when, disaster)
-	// }
 }
 
 func scheduledAlert() {
@@ -407,21 +376,12 @@ func scheduledAlert() {
 	tomorrowCh := make(chan []PolygonDB)
 	dayAfterCh := make(chan []PolygonDB)
 
-	// todayPointCh := make(chan map[string][][][2]float64)
-	// tomorrowPointCh := make(chan map[string][][][2]float64)
-	// dayAfterPointCh := make(chan map[string][][][2]float64)
-
-	// todayTokenCh := make(chan map[string][]string)
-	// tomorrowTokenCh := make(chan map[string][]string)
-	// dayAfterTokenCh := make(chan map[string][]string)
-
 	log.Println("get polygon potensi bencana bmkg..")
 	go getPolygon(t.Year(), int(t.Month()), t.Day(), todayCh)
 	go getPolygon(t1.Year(), int(t1.Month()), t1.Day(), tomorrowCh)
 	go getPolygon(t2.Year(), int(t2.Month()), t2.Day(), dayAfterCh)
 	todayPolygon, tomorrowPolygon, dayAfterTomorrowPolygon := <-todayCh, <-tomorrowCh, <-dayAfterCh
 
-	// opts := []option.ClientOption{option.WithCredentialsFile("bnpbinarisk.json")}
 	ctx := context.Background()
 	app := initializeFCM()
 	client, err := app.Messaging(ctx)
@@ -437,7 +397,7 @@ func scheduledAlert() {
 		"longsor": `http://inarisk1.bnpb.go.id:6080/arcgis/rest/services/inaRISK/INDEKS_BAHAYA_TANAH_LONGSOR/ImageServer/getSamples`,
 		// "covid":   `http://inarisk1.bnpb.go.id:6080/arcgis/rest/services/COVID19/indeks_bahaya_covid19/ImageServer/getSamples`,
 		// "gempa":   `http://inarisk1.bnpb.go.id:6080/arcgis/rest/services/inaRISK/INDEKS_BAHAYA_GEMPABUMI/ImageServer/getSamples`,
-		"ektrem": `http://inarisk1.bnpb.go.id:6080/arcgis/rest/services/inaRISK/INDEKS_BAHAYA_CUACAEKSTRIM/ImageServer/getSamples`,
+		"ekstrem": `http://inarisk1.bnpb.go.id:6080/arcgis/rest/services/inaRISK/INDEKS_BAHAYA_CUACAEKSTRIM/ImageServer/getSamples`,
 	}
 
 	for x := range raster {
@@ -458,10 +418,13 @@ func main() {
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
 
+	log.SetFlags(log.Lmicroseconds)
+
 	if err := Connect(); err != nil {
 		log.Fatal(err)
 	}
 
+	log.Println("it works..")
 	c := cron.New()
 	c.AddFunc("0 0 * * * *", scheduledAlert)
 	c.Start()
